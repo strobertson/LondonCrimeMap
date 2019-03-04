@@ -1,0 +1,111 @@
+---
+title: "Interactive Crime Map - Writeup"
+author: "Scott Robertson"
+date: "18/02/2019"
+output: html_document
+---
+
+```{r setup}
+# Set working directory
+setwd("~/R Programming/Coursera/Data Products/Shiny/LondonCrimeMap")
+
+# Load required packages
+if("dplyr" %in% rownames(installed.packages()) == FALSE){
+      install.packages("dplyr")
+}
+if("tidyr" %in% rownames(installed.packages()) == FALSE){
+      install.packages("tidyr")
+}
+```
+
+## Synopsis
+
+The purpose of this paper is to document the development of an interactive crime map for London using open data from [data.police.uk](https://data.police.uk).
+
+Inspiration and initial code were provided by two articles:
+
+- https://towardsdatascience.com/plotting-a-map-of-london-crime-data-using-r-8dcefef1c397
+- https://thisisnicblog.wordpress.com/
+
+The final product will be presented a shiny dashboard.
+
+
+## Data
+
+Street level crime data can be accessed from [data.police.uk](https://data.police.uk) which holds individual crime data for all UK police forces going back to 2013. An API interface is also avaliable, however as I am not particularly good with APIs I have not used it for this project.
+
+To build the dashboard I have downloaded csv files for the period January 2016 - Decemeber 2018. 
+
+The data is downloaded as a zip folder with seperate CSV files for each month. As these are in individual folders the CSV need to be moved into the same folder. This was done manually in file explorer.
+
+```{r data_load, echo = TRUE, eval = FALSE}
+# Set directory to data folder 
+setwd("~/R Programming/Coursera/Data Products/Shiny/LondonCrimeMap/data/MPS 2014-18")
+
+# Create list of files to import
+file_list <- list.files()
+
+# Run function to import files
+dataset <- do.call("rbind", lapply(file_list, read.csv, header = TRUE))
+
+# Return directory to initial folder
+setwd("~/R Programming/Coursera/Data Products/Shiny/LondonCrimeMap")
+
+# Read in GIS data for mapping
+boroughs<-readOGR(dsn="data/statistical-gis-boundaries-london/ESRI", layer="London_Borough_Excluding_MHW")
+
+# Cut out unnecessary columns
+boroughs@data<-boroughs@data[,c(1,2)]
+
+# transform to WGS884 reference system 
+boroughs<-spTransform(boroughs, CRS("+init=epsg:4326"))
+
+# Find the edges of our map
+bounds<-bbox(boroughs)
+
+# Create a lits of boroughs for cleaning
+borough_list <- boroughs@data[1]
+```
+
+## Preparing reporting datasets
+
+The final dashboard will be comprised of three elements:
+
+- Borough heatmap
+- Interactive point map
+- Crime trend graph
+
+In order to facilitate this we will need to convert the raw data into two different dataframes, one with longitute and latitude per crime and one summarised by borough and crime type.
+
+```{r summary_data}
+ # Create subset for summary totals
+crime_summary <- dataset[,c("Month", "LSOA.name", "Crime.type")] %>% 
+  separate(LSOA.name, c("NAME", "Code"), sep = -5)
+
+# Remove code variable
+crime_summary$Code <- NULL
+
+# Summarise data
+crime_summary <- crime_summary %>%
+  group_by(Month, NAME, Crime.type) %>%
+  summarise(Total = n())
+
+# Remove data from outside London
+crime_summary <- crime_summary[crime_summary$NAME %in% borough_list$NAME,]
+
+```
+
+
+```{r location_data}
+# Create subset with latitue and longitude data
+crime_location <- dataset[,c("Month", "Longitude", "Latitude", "LSOA.name", "Crime.type", "Last.outcome.category")] %>% 
+  separate(LSOA.name, c("NAME", "Code"), sep = -5)
+
+# Remove code variable
+crime_location$Code <- NULL
+
+# Remove data from outside London
+crime_location <- crime_location[crime_location$NAME %in% borough_list$NAME,]
+
+```
+
